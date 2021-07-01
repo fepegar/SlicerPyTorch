@@ -11,3 +11,7 @@ import PyTorchUtils
 torch = PyTorchUtils.PyTorchUtilsLogic().torch  # will be installed if necessary
 tensor = torch.rand(50, 60)
 ```
+
+Here's a diagram of the integration between PyTorch and Slicer:
+
+![Diagram of PyTorch and Slicer](https://raw.githubusercontent.com/NA-MIC/ProjectWeek/master/PW35_2021_Virtual/Projects/PyTorchIntegration/diagram.svg)
