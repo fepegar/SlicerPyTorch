@@ -1,0 +1,13 @@
+# SlicerPyTorch
+
+This is the code for the `PyTorch` extension for [3D Slicer](https://www.slicer.org/).
+
+Its main function is to install [PyTorch](https://pytorch.org/) inside Slicer. The latest version compatible with the installed drivers will be selected automatically.
+
+PyTorch can be installed opening the `PyTorch Utils` module and clicking on the button, or programmatically:
+
+```python
+import PyTorchUtils
+torch = PyTorchUtils.PyTorchUtilsLogic().torch  # will be installed if necessary
+tensor = torch.rand(50, 60)
+```
