@@ -37,12 +37,14 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
 
   def onInstallTorch(self):
     torch = PyTorchUtilsLogic().torch
-    slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed correctly')
+    if torch is not None:
+      slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed correctly')
 
 
 class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     self._torch = None
+    self._wheel = None
 
   @property
   def cuda(self):
@@ -57,20 +59,39 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       self._torch = self.importTorch()
     return self._torch
 
+  @property
+  def wheelURL(self):
+    """URL to the ``torch`` package wheel, retrieved using ``light-the-torch``."""
+    if self._wheel is None:
+      logging.info('Querying light-the-torch for torch wheel...')
+      self._wheel = self.getTorchUrl()
+    return self._wheel
+
   def importTorch(self):
     """Import the ``torch`` Python module, installing it if necessary."""
     try:
       import torch
     except ModuleNotFoundError:
       torch = self.installTorch()
-    logging.info(f'PyTorch {torch.__version__} imported correctly')
-    logging.info(f'CUDA available: {torch.cuda.is_available()}')
+    if torch is None:
+      logging.warning('PyTorch was not installed')
+    else:
+      logging.info(f'PyTorch {torch.__version__} imported correctly')
+      logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
-  def installTorch(self):
+  def installTorch(self, confirm=True):
     """Install PyTorch and return the ``torch`` Python module."""
-    wheelUrl = self.getTorchUrl()
-    slicer.util.pip_install(wheelUrl)
+    if confirm:
+      install = slicer.util.confirmOkCancelDisplay(
+        'PyTorch will be download and installed from the following URL:\n'
+        f'{self.wheelURL}'
+        '\nThe process might take some minutes.'
+      )
+      if not install:
+        logging.info('Installation of PyTorch aborted by user')
+        return None
+    slicer.util.pip_install(self.wheelURL)
     import torch
     logging.info(f'PyTorch {torch.__version__} installed correctly')
     return torch
