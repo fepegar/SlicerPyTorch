@@ -84,7 +84,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     """Install PyTorch and return the ``torch`` Python module."""
     if confirm:
       install = slicer.util.confirmOkCancelDisplay(
-        'PyTorch will be download and installed from the following URL:\n'
+        'PyTorch will be downloaded and installed from the following URL:\n'
         f'{self.wheelURL}'
         '\nThe process might take some minutes.'
       )
