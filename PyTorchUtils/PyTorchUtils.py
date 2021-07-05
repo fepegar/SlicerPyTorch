@@ -19,7 +19,7 @@ class PyTorchUtils(ScriptedLoadableModule):
     self.parent.helpText = 'This hidden module containing some tools to work with PyTorch inside Slicer.'
     self.parent.acknowledgementText = (
       'This work was funded by the Engineering and Physical Sciences'
-      ' Research Council (​EPSRC) and supported by the UCL Centre for Doctoral'
+      ' Research Council (EPSRC) and supported by the UCL Centre for Doctoral'
       ' Training in Intelligent, Integrated Imaging in Healthcare, the UCL'
       ' Wellcome / EPSRC Centre for Interventional and Surgical Sciences (WEISS),'
       ' and the School of Biomedical Engineering & Imaging Sciences (BMEIS)'
