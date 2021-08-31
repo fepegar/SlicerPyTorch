@@ -6,6 +6,7 @@ from slicer.ScriptedLoadableModule import (
   ScriptedLoadableModule,
   ScriptedLoadableModuleWidget,
   ScriptedLoadableModuleLogic,
+  ScriptedLoadableModuleTest,
 )
 
 
@@ -102,3 +103,22 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def getDevice(self):
     """Get CUDA device if available and CPU otherwise."""
     return self.torch.device('cuda') if self.torch.cuda.is_available() else 'cpu'
+
+
+class PyTorchUtilsTest(ScriptedLoadableModuleTest):
+
+  def tearDown(self):
+    self.landmarksPath.unlink()
+
+  def runTest(self):
+    self.test_PyTorchUtils()
+
+  def _delayDisplay(self, message):
+    if not slicer.app.testingEnabled():
+      self.delayDisplay(message)
+
+  def test_PyTorchUtils(self):
+    self._delayDisplay('Starting the test')
+    logic = PyTorchUtilsLogic()
+    self._delayDisplay(f'CUDA available: {logic.torch.cuda.is_available()}')
+    self._delayDisplay('Test passed!')
