@@ -46,11 +46,6 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     self._torch = None
 
   @property
-  def cuda(self):
-    """Return True if a CUDA-compatible device is available."""
-    return self.getDevice() != 'cpu'
-
-  @property
   def torch(self):
     """``torch`` Python module. it will be installed if necessary."""
     if self._torch is None:
@@ -58,18 +53,34 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       self._torch = self.importTorch()
     return self._torch
 
-  def importTorch(self):
-    """Import the ``torch`` Python module, installing it if necessary."""
+  @staticmethod
+  def torchInstalled():
     try:
       import torch
+      installed = True
     except ModuleNotFoundError:
+      installed = False
+    return installed
+
+  def importTorch(self):
+    """Import the ``torch`` Python module, installing it if necessary."""
+    if self.torchInstalled():
+      import torch
+    else:
       torch = self.installTorch()
     logging.info(f'PyTorch {torch.__version__} imported correctly')
     logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
-  def installTorch(self):
+  def installTorch(self, askConfirmation=False):
     """Install PyTorch and return the ``torch`` Python module."""
+    if askConfirmation:
+      install = slicer.util.confirmOkCancelDisplay(
+        'PyTorch will be downloaded and installed now. The process might take some minutes.'
+      )
+      if not install:
+        logging.info('Installation of PyTorch aborted by user')
+        return None
     wheelUrl = self.getTorchUrl()
     slicer.util.pip_install(wheelUrl)
     import torch
@@ -103,6 +114,11 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def getDevice(self):
     """Get CUDA device if available and CPU otherwise."""
     return self.torch.device('cuda') if self.torch.cuda.is_available() else 'cpu'
+
+  @property
+  def cuda(self):
+    """Return True if a CUDA-compatible device is available."""
+    return self.getDevice() != 'cpu'
 
 
 class PyTorchUtilsTest(ScriptedLoadableModuleTest):
