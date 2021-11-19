@@ -123,9 +123,6 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
 class PyTorchUtilsTest(ScriptedLoadableModuleTest):
 
-  def tearDown(self):
-    self.landmarksPath.unlink()
-
   def runTest(self):
     self.test_PyTorchUtils()
 
