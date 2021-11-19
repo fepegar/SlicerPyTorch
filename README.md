@@ -6,7 +6,9 @@
 
 This is the code for the `PyTorch` extension for [3D Slicer](https://www.slicer.org/).
 
-Its main function is to install [PyTorch](https://pytorch.org/) inside Slicer. The latest version compatible with the installed drivers will be selected automatically.
+Its main function is to install [PyTorch](https://pytorch.org/) inside Slicer.
+The latest version compatible with the installed drivers will be selected automatically.
+[CI tests](https://slicer.cdash.org/index.php?project=SlicerPreview&filtercount=1&showfilters=1&field1=buildname&compare1=63&value1=PyTorch) are run nightly.
 
 PyTorch can be installed opening the `PyTorch Utils` module and clicking on the button, or programmatically:
 
