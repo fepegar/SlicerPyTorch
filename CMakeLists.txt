@@ -8,7 +8,7 @@ set(EXTENSION_HOMEPAGE "https://github.com/fepegar/SlicerPyTorch")
 set(EXTENSION_CATEGORY "Utilities")
 set(EXTENSION_CONTRIBUTORS "Fernando Perez-Garcia (University College London and King's College London)")
 set(EXTENSION_DESCRIPTION "Utilities to install and use PyTorch within 3D Slicer.")
-set(EXTENSION_ICONURL "https://raw.githubusercontent.com/fepegar/SlicerPyTorch/master/PyTorch_128.png")
+set(EXTENSION_ICONURL "https://raw.githubusercontent.com/fepegar/SlicerPyTorch/master/PyTorch.png")
 set(EXTENSION_SCREENSHOTURLS "https://raw.githubusercontent.com/fepegar/SlicerPyTorch/master/project_week_diagram.png")
 set(EXTENSION_DEPENDS "NA") # Specified as a list or "NA" if no dependencies
 

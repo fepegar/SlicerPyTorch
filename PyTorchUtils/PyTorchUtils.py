@@ -6,6 +6,7 @@ from slicer.ScriptedLoadableModule import (
   ScriptedLoadableModule,
   ScriptedLoadableModuleWidget,
   ScriptedLoadableModuleLogic,
+  ScriptedLoadableModuleTest,
 )
 
 
@@ -18,8 +19,8 @@ class PyTorchUtils(ScriptedLoadableModule):
     self.parent.contributors = ["Fernando Perez-Garcia (University College London)"]
     self.parent.helpText = 'This hidden module containing some tools to work with PyTorch inside Slicer.'
     self.parent.acknowledgementText = (
-      'This work was was funded by the Engineering and Physical Sciences'
-      ' Research Council (​EPSRC) and supported by the UCL Centre for Doctoral'
+      'This work was funded by the Engineering and Physical Sciences'
+      ' Research Council (EPSRC) and supported by the UCL Centre for Doctoral'
       ' Training in Intelligent, Integrated Imaging in Healthcare, the UCL'
       ' Wellcome / EPSRC Centre for Interventional and Surgical Sciences (WEISS),'
       ' and the School of Biomedical Engineering & Imaging Sciences (BMEIS)'
@@ -47,11 +48,6 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     self._wheel = None
 
   @property
-  def cuda(self):
-    """Return True if a CUDA-compatible device is available."""
-    return self.getDevice() != 'cpu'
-
-  @property
   def torch(self):
     """``torch`` Python module. it will be installed if necessary."""
     if self._torch is None:
@@ -67,11 +63,20 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       self._wheel = self.getTorchUrl()
     return self._wheel
 
-  def importTorch(self):
-    """Import the ``torch`` Python module, installing it if necessary."""
+  @staticmethod
+  def torchInstalled():
     try:
       import torch
+      installed = True
     except ModuleNotFoundError:
+      installed = False
+    return installed
+
+  def importTorch(self):
+    """Import the ``torch`` Python module, installing it if necessary."""
+    if self.torchInstalled():
+      import torch
+    else:
       torch = self.installTorch()
     if torch is None:
       logging.warning('PyTorch was not installed')
@@ -80,9 +85,9 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
-  def installTorch(self, confirm=True):
+  def installTorch(self, askConfirmation=False):
     """Install PyTorch and return the ``torch`` Python module."""
-    if confirm:
+    if askConfirmation and not slicer.app.commandOptions().testingEnabled:
       install = slicer.util.confirmOkCancelDisplay(
         'PyTorch will be downloaded and installed from the following URL:\n'
         f'{self.wheelURL}'
@@ -123,3 +128,24 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def getDevice(self):
     """Get CUDA device if available and CPU otherwise."""
     return self.torch.device('cuda') if self.torch.cuda.is_available() else 'cpu'
+
+  @property
+  def cuda(self):
+    """Return True if a CUDA-compatible device is available."""
+    return self.getDevice() != 'cpu'
+
+
+class PyTorchUtilsTest(ScriptedLoadableModuleTest):
+
+  def runTest(self):
+    self.test_PyTorchUtils()
+
+  def _delayDisplay(self, message):
+    if not slicer.app.testingEnabled():
+      self.delayDisplay(message)
+
+  def test_PyTorchUtils(self):
+    self._delayDisplay('Starting the test')
+    logic = PyTorchUtilsLogic()
+    self._delayDisplay(f'CUDA available: {logic.torch.cuda.is_available()}')
+    self._delayDisplay('Test passed!')
