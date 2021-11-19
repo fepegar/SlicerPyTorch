@@ -38,12 +38,14 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
 
   def onInstallTorch(self):
     torch = PyTorchUtilsLogic().torch
-    slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed correctly')
+    if torch is not None:
+      slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed correctly')
 
 
 class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     self._torch = None
+    self._wheel = None
 
   @property
   def torch(self):
@@ -52,6 +54,14 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       logging.info('Importing torch...')
       self._torch = self.importTorch()
     return self._torch
+
+  @property
+  def wheelURL(self):
+    """URL to the ``torch`` package wheel, retrieved using ``light-the-torch``."""
+    if self._wheel is None:
+      logging.info('Querying light-the-torch for torch wheel...')
+      self._wheel = self.getTorchUrl()
+    return self._wheel
 
   @staticmethod
   def torchInstalled():
@@ -68,21 +78,25 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       import torch
     else:
       torch = self.installTorch()
-    logging.info(f'PyTorch {torch.__version__} imported correctly')
-    logging.info(f'CUDA available: {torch.cuda.is_available()}')
+    if torch is None:
+      logging.warning('PyTorch was not installed')
+    else:
+      logging.info(f'PyTorch {torch.__version__} imported correctly')
+      logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
   def installTorch(self, askConfirmation=False):
     """Install PyTorch and return the ``torch`` Python module."""
     if askConfirmation and not slicer.app.commandOptions().testingEnabled:
       install = slicer.util.confirmOkCancelDisplay(
-        'PyTorch will be downloaded and installed now. The process might take some minutes.'
+        'PyTorch will be downloaded and installed from the following URL:\n'
+        f'{self.wheelURL}'
+        '\nThe process might take some minutes.'
       )
       if not install:
         logging.info('Installation of PyTorch aborted by user')
         return None
-    wheelUrl = self.getTorchUrl()
-    slicer.util.pip_install(wheelUrl)
+    slicer.util.pip_install(self.wheelURL)
     import torch
     logging.info(f'PyTorch {torch.__version__} installed correctly')
     return torch
