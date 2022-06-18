@@ -109,7 +109,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     PyTorch compatible with the installed NVIDIA drivers. If no CUDA-compatible
     device is found, a version compiled for CPU will be installed.
     """
-    slicer.util.pip_install('light-the-torch')
+    slicer.util.pip_install('light-the-torch<0.4')
     import light_the_torch as ltt
     wheelUrl = ltt.find_links(['torch'])[0]
     return wheelUrl
