@@ -29,23 +29,97 @@ class PyTorchUtils(ScriptedLoadableModule):
 
 
 class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
+
   def setup(self):
     super().setup()
-    self.installPushButton = qt.QPushButton('Install PyTorch')
-    self.layout.addWidget(self.installPushButton)
-    self.installPushButton.clicked.connect(self.onInstallTorch)
-    self.layout.addStretch(1)
+
+    self.logic = PyTorchUtilsLogic()
+
+    # Load widget from .ui file (created by Qt Designer).
+    # Additional widgets can be instantiated manually and added to self.layout.
+    uiWidget = slicer.util.loadUI(self.resourcePath('UI/PyTorchUtils.ui'))
+    self.layout.addWidget(uiWidget)
+    self.ui = slicer.util.childWidgetVariables(uiWidget)
+
+    self.ui.detectPushButton.clicked.connect(self.onDetect)
+    self.ui.installPushButton.clicked.connect(self.onInstallTorch)
+    self.ui.uninstallPushButton.clicked.connect(self.onUninstallTorch)
+    self.ui.restartPushButton.clicked.connect(self.onApplicationRestart)
+
+    self.updateVersionInformation()
+
+  def onDetect(self):
+    with slicer.util.tryWithErrorDisplay("Failed to detect compatible computation backends.", waitCursor=True):
+      backends = self.logic.getCompatibleComputationBackends()
+      currentBackend = self.ui.backendComboBox.currentText
+      self.ui.backendComboBox.clear()
+      self.ui.backendComboBox.addItem("automatic")
+      for backend in backends:
+        self.ui.backendComboBox.addItem(backend)
+      self.ui.backendComboBox.currentText = currentBackend
+      self.ui.backendComboBox.showPopup()
+    self.updateVersionInformation()
 
   def onInstallTorch(self):
-    torch = PyTorchUtilsLogic().torch
-    if torch is not None:
-      slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed correctly')
+    with slicer.util.tryWithErrorDisplay("Failed to install PyTorch. Some PyTorch files may be in use or corrupted. Please restart the application, uninstall PyTorch, and try installing again.", waitCursor=True):
+      if self.logic.torchInstalled():
+        torch = self.logic.torch
+        slicer.util.delayDisplay(f'PyTorch {torch.__version__} is already installed, using {self.logic.getDevice()}.', autoCloseMsec=2000)
+      else:
+        backend = self.ui.backendComboBox.currentText
+        automaticBackend = (backend == "automatic")
+        askConfirmation = automaticBackend
+        torch = self.logic.installTorch(askConfirmation, None if automaticBackend else backend)
+        if torch is not None:
+          slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed successfully using {self.logic.getDevice()}.', autoCloseMsec=2000)
+    self.updateVersionInformation()
 
+  def onUninstallTorch(self):
+    with slicer.util.tryWithErrorDisplay("Failed to uninstall PyTorch. Probably PyTorch is already in use. Please restart the application and try again.", waitCursor=True):
+      self.logic.uninstallTorch()
+      slicer.util.delayDisplay(f'PyTorch uninstalled successfully.', autoCloseMsec=2000)
+    self.updateVersionInformation()
+
+  def updateVersionInformation(self):
+    try:
+      self.ui.torchVersionInformation.text = self.logic.torchVersionInformation
+    except Exception as e:
+      logging.error(str(e))
+      self.ui.torchVersionInformation.text = "unknown (corrupted installation?)"
+    try:
+      info = self.logic.nvidiaDriverVersionInformation
+      self.ui.nvidiaVersionInformation.text = info if info else "unknown"
+    except Exception as e:
+      logging.error(str(e))
+      self.ui.nvidiaVersionInformation.text = "unknown"
+
+  def onApplicationRestart(self):
+    slicer.util.restart()
 
 class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def __init__(self):
     self._torch = None
-    self._wheel = None
+
+  @property
+  def nvidiaDriverVersionInformation(self):
+    """Get NVIDIA driver version information as a string that can be displayed to the user.
+    If light-the-torch is not installed yet then empty string is returned.
+    """
+
+    try:
+      import light_the_torch._cb as computationBackend
+      return f"installed version {str(computationBackend._detect_nvidia_driver_version())}"
+    except Exception as e:
+      return ""
+
+  @property
+  def torchVersionInformation(self):
+    """Get PyTorch version information as a string that can be displayed to the user.
+    """
+    if not self.torchInstalled():
+      return "not installed"
+    import torch
+    return f"installed version {torch.__version__}"
 
   @property
   def torch(self):
@@ -55,16 +129,14 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       self._torch = self.importTorch()
     return self._torch
 
-  @property
-  def wheelURL(self):
-    """URL to the ``torch`` package wheel, retrieved using ``light-the-torch``."""
-    if self._wheel is None:
-      logging.info('Querying light-the-torch for torch wheel...')
-      self._wheel = self.getTorchUrl()
-    return self._wheel
-
   @staticmethod
   def torchInstalled():
+    # Attempt to import torch could load some files, which could prevent uninstalling a corrupted pytorch install
+    import importlib.metadata
+    try:
+      metadataPath = [p for p in importlib.metadata.files('torch') if 'METADATA' in str(p)][0]
+    except importlib.metadata.PackageNotFoundError as e:
+      return False
     try:
       import torch
       installed = True
@@ -81,38 +153,74 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     if torch is None:
       logging.warning('PyTorch was not installed')
     else:
-      logging.info(f'PyTorch {torch.__version__} imported correctly')
+      logging.info(f'PyTorch {torch.__version__} imported successfully')
       logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
-  def installTorch(self, askConfirmation=False):
-    """Install PyTorch and return the ``torch`` Python module."""
+  def installTorch(self, askConfirmation=False, forceComputationBackend=None):
+    """Install PyTorch and return the ``torch`` Python module.
+
+    :param forceComputationBackend: optional parameter to set computation backend (cpu, cu116, cu117, ...)
+
+    If computation backend is not specified then the ``light-the-torch`` Python package is used to get the most recent version of
+    PyTorch compatible with the installed NVIDIA drivers. If CUDA-compatible device is not found, a version compiled for CPU will be installed.
+    """
+
+    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend)
+
     if askConfirmation and not slicer.app.commandOptions().testingEnabled:
       install = slicer.util.confirmOkCancelDisplay(
-        'PyTorch will be downloaded and installed from the following URL:\n'
-        f'{self.wheelURL}'
-        '\nThe process might take some minutes.'
+        f'PyTorch will be downloaded and installed using light-the-torch (ltt {" ".join(args)}).'
+        ' The process might take some minutes.'
       )
       if not install:
         logging.info('Installation of PyTorch aborted by user')
         return None
-    slicer.util.pip_install(self.wheelURL)
+
+    slicer.util._executePythonModule('light_the_torch', args)
     import torch
-    logging.info(f'PyTorch {torch.__version__} installed correctly')
+    logging.info(f'PyTorch {torch.__version__} installed successfully.')
     return torch
 
-  @staticmethod
-  def getTorchUrl():
-    """Get best PyTorch version compatible with the device.
+  def uninstallTorch(self, askConfirmation=False, forceComputationBackend=None):
+    """Uninstall PyTorch"""
+    slicer.util.pip_uninstall('torch')
+    logging.info(f'PyTorch uninstalled successfully.')
 
-    This method uses ``light-the-torch`` to get the most recent version of
-    PyTorch compatible with the installed NVIDIA drivers. If no CUDA-compatible
-    device is found, a version compiled for CPU will be installed.
+  @staticmethod
+  def _getPipInstallArguments(forceComputationBackend=None):
+    args = ["install","torch"]
+    if forceComputationBackend is not None:
+      args.append(f"--pytorch-computation-backend={forceComputationBackend}")
+    return args
+
+  @staticmethod
+  def _installLightTheTorch():
+    slicer.util.pip_install('light-the-torch>=0.5')
+
+  @staticmethod
+  def getCompatibleComputationBackends(forceComputationBackend=None):
+    """Get the list of computation backends compatible with the available hardware.
+
+    :param forceComputationBackend: optional parameter to set computation backend (cpu, cu116, cu117, ...)
+
+    If computation backend is not specified then the ``light-the-torch`` is used to get the most recent version of
+    PyTorch compatible with the installed NVIDIA drivers.
     """
-    slicer.util.pip_install('light-the-torch<0.4')
-    import light_the_torch as ltt
-    wheelUrl = ltt.find_links(['torch'])[0]
-    return wheelUrl
+    try:
+      import light_the_torch._patch
+    except:
+      PyTorchUtilsLogic._installLightTheTorch()
+      import light_the_torch._patch
+
+    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend)
+    try:
+      backends = sorted(light_the_torch._patch.LttOptions.from_pip_argv(args).computation_backends)
+    except Exception as e:
+      logging.warning(str(e))
+      raise ValueError(f"Failed to get computation backend. Requested computation backend: `{forceComputationBackend}`.")
+
+    return backends
 
   def getPyTorchHubModel(self, repoOwner, repoName, modelName, addPretrainedKwarg=True, *args, **kwargs):
     """Use PyTorch Hub to download a PyTorch model, typically pre-trained.
