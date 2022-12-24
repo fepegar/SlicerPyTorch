@@ -110,6 +110,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       import light_the_torch._cb as computationBackend
       return f"installed version {str(computationBackend._detect_nvidia_driver_version())}"
     except Exception as e:
+      # Don't install light-the-torch just for getting the NVIDIA driver version
       return ""
 
   @property
@@ -176,6 +177,12 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       if not install:
         logging.info('Installation of PyTorch aborted by user')
         return None
+
+    try:
+      import light_the_torch._patch
+    except:
+      PyTorchUtilsLogic._installLightTheTorch()
+      import light_the_torch._patch
 
     slicer.util._executePythonModule('light_the_torch', args)
     import torch
