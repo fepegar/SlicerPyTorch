@@ -50,7 +50,7 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
 
   def onDetect(self):
     with slicer.util.tryWithErrorDisplay("Failed to detect compatible computation backends.", waitCursor=True):
-      backends = self.logic.getCompatibleComputationBackends()
+      backends = PyTorchUtilsLogic.getCompatibleComputationBackends()
       currentBackend = self.ui.backendComboBox.currentText
       self.ui.backendComboBox.clear()
       self.ui.backendComboBox.addItem("automatic")
@@ -62,7 +62,7 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
 
   def onInstallTorch(self):
     with slicer.util.tryWithErrorDisplay("Failed to install PyTorch. Some PyTorch files may be in use or corrupted. Please restart the application, uninstall PyTorch, and try installing again.", waitCursor=True):
-      if self.logic.torchInstalled():
+      if PyTorchUtilsLogic.torchInstalled():
         torch = self.logic.torch
         slicer.util.delayDisplay(f'PyTorch {torch.__version__} is already installed, using {self.logic.getDevice()}.', autoCloseMsec=2000)
       else:
@@ -88,10 +88,10 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
       self.ui.torchVersionInformation.text = "unknown (corrupted installation?)"
     try:
       info = self.logic.nvidiaDriverVersionInformation
-      self.ui.nvidiaVersionInformation.text = info if info else "unknown"
+      self.ui.nvidiaVersionInformation.text = info if info else "not found"
     except Exception as e:
       logging.error(str(e))
-      self.ui.nvidiaVersionInformation.text = "unknown"
+      self.ui.nvidiaVersionInformation.text = "not found"
 
   def onApplicationRestart(self):
     slicer.util.restart()
@@ -108,7 +108,11 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
     try:
       import light_the_torch._cb as computationBackend
-      return f"installed version {str(computationBackend._detect_nvidia_driver_version())}"
+      version = computationBackend._detect_nvidia_driver_version()
+      if version is None:
+        return ""
+      else:
+        return f"installed version {str(version)}"
     except Exception as e:
       # Don't install light-the-torch just for getting the NVIDIA driver version
       return ""
@@ -117,7 +121,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def torchVersionInformation(self):
     """Get PyTorch version information as a string that can be displayed to the user.
     """
-    if not self.torchInstalled():
+    if not PyTorchUtilsLogic.torchInstalled():
       return "not installed"
     import torch
     return f"installed version {torch.__version__}"
@@ -147,7 +151,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
   def importTorch(self):
     """Import the ``torch`` Python module, installing it if necessary."""
-    if self.torchInstalled():
+    if PyTorchUtilsLogic.torchInstalled():
       import torch
     else:
       torch = self.installTorch()
@@ -191,12 +195,12 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
   def uninstallTorch(self, askConfirmation=False, forceComputationBackend=None):
     """Uninstall PyTorch"""
-    slicer.util.pip_uninstall('torch')
+    slicer.util.pip_uninstall('torch torchvision')
     logging.info(f'PyTorch uninstalled successfully.')
 
   @staticmethod
   def _getPipInstallArguments(forceComputationBackend=None):
-    args = ["install","torch"]
+    args = ["install", "torch", "torchvision"]
     if forceComputationBackend is not None:
       args.append(f"--pytorch-computation-backend={forceComputationBackend}")
     return args
