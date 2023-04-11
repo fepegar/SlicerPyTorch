@@ -6,7 +6,7 @@ project(PyTorch)
 # Extension meta-information
 set(EXTENSION_HOMEPAGE "https://github.com/fepegar/SlicerPyTorch")
 set(EXTENSION_CATEGORY "Utilities")
-set(EXTENSION_CONTRIBUTORS "Fernando Perez-Garcia (University College London and King's College London)")
+set(EXTENSION_CONTRIBUTORS "Fernando Perez-Garcia (University College London and King's College London) and Andras Lasso (PerkLab Queen's University)")
 set(EXTENSION_DESCRIPTION "Utilities to install and use PyTorch within 3D Slicer.")
 set(EXTENSION_ICONURL "https://raw.githubusercontent.com/fepegar/SlicerPyTorch/master/PyTorch.png")
 set(EXTENSION_SCREENSHOTURLS "https://raw.githubusercontent.com/fepegar/SlicerPyTorch/master/project_week_diagram.png")

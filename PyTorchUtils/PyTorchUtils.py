@@ -16,7 +16,10 @@ class PyTorchUtils(ScriptedLoadableModule):
     self.parent.title = "PyTorch Utils"
     self.parent.categories = ['Utilities']
     self.parent.dependencies = []
-    self.parent.contributors = ["Fernando Perez-Garcia (University College London)"]
+    self.parent.contributors = [
+      "Fernando Perez-Garcia (University College London and King's College London)",
+      "Andras Lasso (PerkLab Queen's University)",
+    ]
     self.parent.helpText = 'This hidden module containing some tools to work with PyTorch inside Slicer.'
     self.parent.acknowledgementText = (
       'This work was funded by the Engineering and Physical Sciences'
