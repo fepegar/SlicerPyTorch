@@ -53,7 +53,8 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
 
   def onDetect(self):
     with slicer.util.tryWithErrorDisplay("Failed to detect compatible computation backends.", waitCursor=True):
-      backends = PyTorchUtilsLogic.getCompatibleComputationBackends()
+      torchVersionRequirement = self.ui.torchVersionLineEdit.text
+      backends = PyTorchUtilsLogic.getCompatibleComputationBackends(torchVersionRequirement=torchVersionRequirement)
       currentBackend = self.ui.backendComboBox.currentText
       self.ui.backendComboBox.clear()
       self.ui.backendComboBox.addItem("automatic")
@@ -72,7 +73,8 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
         backend = self.ui.backendComboBox.currentText
         automaticBackend = (backend == "automatic")
         askConfirmation = automaticBackend
-        torch = self.logic.installTorch(askConfirmation, None if automaticBackend else backend)
+        torchVersionRequirement = self.ui.torchVersionLineEdit.text
+        torch = self.logic.installTorch(askConfirmation, None if automaticBackend else backend, torchVersionRequirement)
         if torch is not None:
           slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed successfully using {self.logic.getDevice()}.', autoCloseMsec=2000)
     self.updateVersionInformation()
@@ -165,16 +167,17 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
-  def installTorch(self, askConfirmation=False, forceComputationBackend=None):
+  def installTorch(self, askConfirmation=False, forceComputationBackend=None, torchVersionRequirement=None):
     """Install PyTorch and return the ``torch`` Python module.
 
     :param forceComputationBackend: optional parameter to set computation backend (cpu, cu116, cu117, ...)
+    :param torchVersionRequirement: optional version requirement for torch (e.g., ">=1.12")
 
     If computation backend is not specified then the ``light-the-torch`` Python package is used to get the most recent version of
     PyTorch compatible with the installed NVIDIA drivers. If CUDA-compatible device is not found, a version compiled for CPU will be installed.
     """
 
-    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend)
+    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend, torchVersionRequirement)
 
     if askConfirmation and not slicer.app.commandOptions().testingEnabled:
       install = slicer.util.confirmOkCancelDisplay(
@@ -202,8 +205,10 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     logging.info(f'PyTorch uninstalled successfully.')
 
   @staticmethod
-  def _getPipInstallArguments(forceComputationBackend=None):
-    args = ["install", "torch", "torchvision"]
+  def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None):
+    if torchVersionRequirement is None:
+      torchVersionRequirement = ""
+    args = ["install", "torch"+torchVersionRequirement, "torchvision"]
     if forceComputationBackend is not None:
       args.append(f"--pytorch-computation-backend={forceComputationBackend}")
     return args
@@ -213,10 +218,11 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     slicer.util.pip_install('light-the-torch>=0.5')
 
   @staticmethod
-  def getCompatibleComputationBackends(forceComputationBackend=None):
+  def getCompatibleComputationBackends(forceComputationBackend=None, torchVersionRequirement=None):
     """Get the list of computation backends compatible with the available hardware.
 
     :param forceComputationBackend: optional parameter to set computation backend (cpu, cu116, cu117, ...)
+    :param torchVersionRequirement: optional version requirement for torch (e.g., ">=1.12")
 
     If computation backend is not specified then the ``light-the-torch`` is used to get the most recent version of
     PyTorch compatible with the installed NVIDIA drivers.
@@ -227,7 +233,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       PyTorchUtilsLogic._installLightTheTorch()
       import light_the_torch._patch
 
-    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend)
+    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend, torchVersionRequirement)
     try:
       backends = sorted(light_the_torch._patch.LttOptions.from_pip_argv(args).computation_backends)
     except Exception as e:
