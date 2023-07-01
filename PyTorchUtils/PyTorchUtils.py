@@ -74,7 +74,8 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
         automaticBackend = (backend == "automatic")
         askConfirmation = automaticBackend
         torchVersionRequirement = self.ui.torchVersionLineEdit.text
-        torch = self.logic.installTorch(askConfirmation, None if automaticBackend else backend, torchVersionRequirement)
+        torchvisionVersionRequirement = self.ui.torchvisionVersionLineEdit.text
+        torch = self.logic.installTorch(askConfirmation, None if automaticBackend else backend, torchVersionRequirement, torchvisionVersionRequirement)
         if torch is not None:
           slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed successfully using {self.logic.getDevice()}.', autoCloseMsec=2000)
     self.updateVersionInformation()
@@ -91,6 +92,11 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
     except Exception as e:
       logging.error(str(e))
       self.ui.torchVersionInformation.text = "unknown (corrupted installation?)"
+    try:
+      self.ui.torchvisionVersionInformation.text = self.logic.torchvisionVersionInformation
+    except Exception as e:
+      logging.error(str(e))
+      self.ui.torchvisionVersionInformation.text = "unknown (corrupted installation?)"
     try:
       info = self.logic.nvidiaDriverVersionInformation
       self.ui.nvidiaVersionInformation.text = info if info else "not found"
@@ -132,6 +138,15 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     return f"installed version {torch.__version__}"
 
   @property
+  def torchvisionVersionInformation(self):
+    """Get TorchVision version information as a string that can be displayed to the user.
+    """
+    if not PyTorchUtilsLogic.torchvisionInstalled():
+      return "not installed"
+    import torchvision
+    return f"installed version {torchvision.__version__}"
+
+  @property
   def torch(self):
     """``torch`` Python module. it will be installed if necessary."""
     if self._torch is None:
@@ -154,6 +169,15 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       installed = False
     return installed
 
+  @staticmethod
+  def torchvisionInstalled():
+    try:
+      import torchvision
+      installed = True
+    except ModuleNotFoundError:
+      installed = False
+    return installed
+
   def importTorch(self):
     """Import the ``torch`` Python module, installing it if necessary."""
     if PyTorchUtilsLogic.torchInstalled():
@@ -167,17 +191,18 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       logging.info(f'CUDA available: {torch.cuda.is_available()}')
     return torch
 
-  def installTorch(self, askConfirmation=False, forceComputationBackend=None, torchVersionRequirement=None):
+  def installTorch(self, askConfirmation=False, forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
     """Install PyTorch and return the ``torch`` Python module.
 
     :param forceComputationBackend: optional parameter to set computation backend (cpu, cu116, cu117, ...)
     :param torchVersionRequirement: optional version requirement for torch (e.g., ">=1.12")
+    :param torchvisionVersionRequirement: optional version requirement for torchvision (e.g., ">=0.8")
 
     If computation backend is not specified then the ``light-the-torch`` Python package is used to get the most recent version of
     PyTorch compatible with the installed NVIDIA drivers. If CUDA-compatible device is not found, a version compiled for CPU will be installed.
     """
 
-    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend, torchVersionRequirement)
+    args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend, torchVersionRequirement, torchvisionVersionRequirement)
 
     if askConfirmation and not slicer.app.commandOptions().testingEnabled:
       install = slicer.util.confirmOkCancelDisplay(
@@ -205,10 +230,12 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     logging.info(f'PyTorch uninstalled successfully.')
 
   @staticmethod
-  def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None):
+  def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
     if torchVersionRequirement is None:
       torchVersionRequirement = ""
-    args = ["install", "torch"+torchVersionRequirement, "torchvision"]
+    if torchvisionVersionRequirement is None:
+      torchvisionVersionRequirement = ""
+    args = ["install", "torch"+torchVersionRequirement, "torchvision"+torchvisionVersionRequirement]
     if forceComputationBackend is not None:
       args.append(f"--pytorch-computation-backend={forceComputationBackend}")
     return args
