@@ -213,6 +213,8 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
         logging.info('Installation of PyTorch aborted by user')
         return None
 
+    logging.info(f"Install PyTorch using light-the-torch with arguments: {args}")
+
     try:
       import light_the_torch._patch
     except:
