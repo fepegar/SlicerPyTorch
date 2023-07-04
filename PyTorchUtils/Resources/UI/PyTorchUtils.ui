@@ -6,19 +6,13 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>442</width>
-    <height>449</height>
+    <width>394</width>
+    <height>378</height>
    </rect>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QFrame" name="frame">
-     <property name="minimumSize">
-      <size>
-       <width>0</width>
-       <height>30</height>
-      </size>
-     </property>
      <property name="frameShape">
       <enum>QFrame::StyledPanel</enum>
      </property>
@@ -29,7 +23,7 @@
       <item row="0" column="0">
        <widget class="QLabel" name="label_7">
         <property name="text">
-         <string>PyTorch:</string>
+         <string>Torch:</string>
         </property>
        </widget>
       </item>
@@ -41,28 +35,28 @@
        </widget>
       </item>
       <item row="1" column="0">
-       <widget class="QLabel" name="label_8">
-        <property name="text">
-         <string>NVIDIA driver:</string>
-        </property>
-       </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QLabel" name="nvidiaVersionInformation">
-        <property name="text">
-         <string/>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
        <widget class="QLabel" name="label_11">
         <property name="text">
          <string>TorchVision:</string>
         </property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="1" column="1">
        <widget class="QLabel" name="torchvisionVersionInformation">
+        <property name="text">
+         <string/>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_8">
+        <property name="text">
+         <string>NVIDIA driver:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLabel" name="nvidiaVersionInformation">
         <property name="text">
          <string/>
         </property>
@@ -80,28 +74,45 @@
       <item row="0" column="0">
        <widget class="QLabel" name="label_9">
         <property name="text">
-         <string>PyTorch version requirement:</string>
+         <string>Torch version requirement:</string>
         </property>
        </widget>
       </item>
       <item row="0" column="1">
        <widget class="QLineEdit" name="torchVersionLineEdit">
         <property name="toolTip">
-         <string>Optional version requirement for installing PyTorch. For example, to install PyTorch version 1.12 or later, set this to &quot;&gt;=1.12&quot;. The field has no effect if PyTorch is already installed.</string>
+         <string>Optional version requirement for installing Torch. For example, to install TorchVision version to earlier than 2.0, set this to &quot;&lt;2.0&quot;. The field has no effect if PyTorch is already installed.</string>
         </property>
         <property name="placeholderText">
          <string>default</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="0">
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>TorchVision version requirement:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="torchvisionVersionLineEdit">
+        <property name="toolTip">
+         <string>Optional version requirement for installing TorchVision. For example, to install TorchVision version 1.12 or later, set this to &quot;&gt;=1.12&quot;. The field has no effect if PyTorch is already installed.</string>
+        </property>
+        <property name="placeholderText">
+         <string>default</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
        <widget class="QLabel" name="label_6">
         <property name="text">
          <string>Computation backend:</string>
         </property>
        </widget>
       </item>
-      <item row="3" column="1">
+      <item row="2" column="1">
        <layout class="QHBoxLayout" name="horizontalLayout">
         <item>
          <widget class="QComboBox" name="backendComboBox">
@@ -141,43 +152,39 @@
         </item>
        </layout>
       </item>
-      <item row="5" column="0" colspan="2">
+      <item row="3" column="0" colspan="2">
        <widget class="QPushButton" name="installPushButton">
+        <property name="toolTip">
+         <string>Install Torch and TorchVision</string>
+        </property>
         <property name="text">
          <string>Install PyTorch</string>
         </property>
        </widget>
       </item>
-      <item row="6" column="0" colspan="2">
-       <widget class="QPushButton" name="uninstallPushButton">
-        <property name="text">
-         <string>Uninstall PyTorch</string>
-        </property>
-       </widget>
-      </item>
-      <item row="7" column="0" colspan="2">
-       <widget class="QPushButton" name="restartPushButton">
-        <property name="toolTip">
-         <string>Restart Slicer. If PyTorch is in use, the application must be restarted before it can be uninstalled.</string>
-        </property>
-        <property name="text">
-         <string>Restart the application</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="0">
-       <widget class="QLabel" name="label_10">
-        <property name="text">
-         <string>TorchVision version requirement</string>
-        </property>
-       </widget>
-      </item>
-      <item row="2" column="1">
-       <widget class="QLineEdit" name="torchvisionVersionLineEdit">
-        <property name="placeholderText">
-         <string>default</string>
-        </property>
-       </widget>
+      <item row="4" column="0" colspan="2">
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
+        <item>
+         <widget class="QPushButton" name="uninstallPushButton">
+          <property name="toolTip">
+           <string>Uninstall Torch and TorchVision. Application restart may be required.</string>
+          </property>
+          <property name="text">
+           <string>Uninstall PyTorch</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="restartPushButton">
+          <property name="toolTip">
+           <string>Restart Slicer. If Torch is in use, the application must be restarted before it can be uninstalled.</string>
+          </property>
+          <property name="text">
+           <string>Restart the application</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
       </item>
      </layout>
     </widget>
