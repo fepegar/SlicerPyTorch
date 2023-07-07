@@ -18,7 +18,6 @@ torch = PyTorchUtils.PyTorchUtilsLogic().torch  # will be installed if necessary
 tensor = torch.rand(50, 60)
 ```
 
-Please use a Preview Release of 3D Slicer (currently 4.13, **not** 4.11).
 
 Unit tests are run nightly and the results can be checked on [CDash](https://slicer.cdash.org/index.php?project=SlicerPreview&filtercount=1&showfilters=1&field1=buildname&compare1=63&value1=PyTorch).
 
