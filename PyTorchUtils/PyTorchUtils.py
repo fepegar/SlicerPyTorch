@@ -229,7 +229,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def uninstallTorch(self, askConfirmation=False, forceComputationBackend=None):
     """Uninstall PyTorch"""
     slicer.util.pip_uninstall('torch torchvision')
-    logging.info(f'PyTorch uninstalled successfully.')
+    logging.info('PyTorch uninstalled successfully.')
 
   @staticmethod
   def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
