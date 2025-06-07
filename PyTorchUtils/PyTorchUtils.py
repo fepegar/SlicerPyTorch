@@ -1,12 +1,12 @@
-import qt
 import logging
 
+import qt
 import slicer
 from slicer.ScriptedLoadableModule import (
   ScriptedLoadableModule,
-  ScriptedLoadableModuleWidget,
   ScriptedLoadableModuleLogic,
   ScriptedLoadableModuleTest,
+  ScriptedLoadableModuleWidget,
 )
 
 
