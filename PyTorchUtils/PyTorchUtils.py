@@ -1,12 +1,11 @@
-import qt
 import logging
 
 import slicer
 from slicer.ScriptedLoadableModule import (
   ScriptedLoadableModule,
-  ScriptedLoadableModuleWidget,
   ScriptedLoadableModuleLogic,
   ScriptedLoadableModuleTest,
+  ScriptedLoadableModuleWidget,
 )
 
 
@@ -83,7 +82,7 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
   def onUninstallTorch(self):
     with slicer.util.tryWithErrorDisplay("Failed to uninstall PyTorch. Probably PyTorch is already in use. Please restart the application and try again.", waitCursor=True):
       self.logic.uninstallTorch()
-      slicer.util.delayDisplay(f'PyTorch uninstalled successfully.', autoCloseMsec=2000)
+      slicer.util.delayDisplay('PyTorch uninstalled successfully.', autoCloseMsec=2000)
     self.updateVersionInformation()
 
   def updateVersionInformation(self):
@@ -124,7 +123,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
         return ""
       else:
         return f"installed version {str(version)}"
-    except Exception as e:
+    except Exception:
       # Don't install light-the-torch just for getting the NVIDIA driver version
       return ""
 
@@ -159,9 +158,10 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     # Attempt to import torch could load some files, which could prevent uninstalling a corrupted pytorch install
     import importlib.metadata
     try:
-      metadataPath = [p for p in importlib.metadata.files('torch') if 'METADATA' in str(p)][0]
-    except importlib.metadata.PackageNotFoundError as e:
+      importlib.metadata.files('torch')
+    except importlib.metadata.PackageNotFoundError:
       return False
+
     try:
       import torch
       installed = True
@@ -219,7 +219,6 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       import light_the_torch._patch
     except:
       PyTorchUtilsLogic._installLightTheTorch()
-      import light_the_torch._patch
 
     slicer.util._executePythonModule('light_the_torch', args)
     import torch
@@ -229,7 +228,7 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def uninstallTorch(self, askConfirmation=False, forceComputationBackend=None):
     """Uninstall PyTorch"""
     slicer.util.pip_uninstall('torch torchvision')
-    logging.info(f'PyTorch uninstalled successfully.')
+    logging.info('PyTorch uninstalled successfully.')
 
   @staticmethod
   def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
