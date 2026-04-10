@@ -244,7 +244,11 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def _installLightTheTorch():
-    slicer.util.pip_install('light-the-torch>=0.5')
+    # Install from the Slicer fork which includes support for newer CUDA
+    # versions (cu128+) needed for Blackwell and newer GPU architectures.
+    # The upstream PyPI release (0.8.0) only supports up to cu126.
+    slicer.util.pip_install(
+      'https://github.com/Slicer/light-the-torch/archive/main.zip')
 
   @staticmethod
   def getCompatibleComputationBackends(forceComputationBackend=None, torchVersionRequirement=None):
