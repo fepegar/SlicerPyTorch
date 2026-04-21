@@ -244,7 +244,10 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def _installLightTheTorch():
-    slicer.util.pip_install('light-the-torch>=0.5')
+    # Install from the Slicer fork which is maintained for newer CUDA versions
+    # see: https://github.com/fepegar/SlicerPyTorch/pull/20
+    slicer.util.pip_install(
+      'https://github.com/Slicer/light-the-torch/archive/main.zip')
 
   @staticmethod
   def getCompatibleComputationBackends(forceComputationBackend=None, torchVersionRequirement=None):
