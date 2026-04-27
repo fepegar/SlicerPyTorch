@@ -246,6 +246,8 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
   def _installLightTheTorch():
     # Install from the Slicer fork which is maintained for newer CUDA versions
     # see: https://github.com/fepegar/SlicerPyTorch/pull/20
+    import os
+    os.environ["SETUPTOOLS_SCM_PRETEND_VERSION_FOR_LIGHT_THE_TORCH"] = "0.8.0"
     slicer.util.pip_install(
       'https://github.com/Slicer/light-the-torch/archive/main.zip')
 
