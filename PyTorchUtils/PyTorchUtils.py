@@ -233,11 +233,21 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
   @staticmethod
   def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
+    import sys
+    if sys.platform == "darwin":
+      # macOS with Rosetta2 requires torch >= 2.1.2; torchvision 0.16.2 corresponds to that torch version
+      if not torchVersionRequirement:
+        torchVersionRequirement = ">=2.1.2"
+      if not torchvisionVersionRequirement:
+        torchvisionVersionRequirement = ">=0.16.2"
     if torchVersionRequirement is None:
       torchVersionRequirement = ""
     if torchvisionVersionRequirement is None:
       torchvisionVersionRequirement = ""
     args = ["install", "torch"+torchVersionRequirement, "torchvision"+torchvisionVersionRequirement]
+    if sys.platform == "darwin":
+      # On macOS, the PyTorch version available on PyPI requires numpy<2, and installing it with pip will fail if numpy 2 is already installed. This is not an issue on other platforms where newer PyTorch versions are available.
+      args.append("numpy<2")
     if forceComputationBackend is not None:
       args.append(f"--pytorch-computation-backend={forceComputationBackend}")
     return args
