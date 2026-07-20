@@ -240,6 +240,20 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
         torchVersionRequirement = ">=2.1.2"
       if not torchvisionVersionRequirement:
         torchvisionVersionRequirement = ">=0.16.2"
+    if sys.platform == "win32":
+      # Temporary workaround: torch 2.13 cannot be installed on Windows into a default Slicer installation.
+      # This version ships PEP 639 license files that reproduce PyTorch's vendored source tree inside
+      # torch-<version>.dist-info/licenses. The deepest collected path is 162 characters relative to
+      # site-packages, while Windows limits directory creation to MAX_PATH-12 (248 characters), therefore
+      # the installation fails with "[WinError 206] The filename or extension is too long" if the path of
+      # site-packages is longer than 86 characters (a default Slicer installation is exactly at this limit).
+      # The failed installation leaves a partially extracted torch package behind, which is hard to remove,
+      # because deleting those files hits the same path length limit.
+      # This restriction can be removed when PyTorch no longer collects the deeply nested license files
+      # (see https://github.com/pytorch/pytorch/pull/185813).
+      torchVersionRequirement = PyTorchUtilsLogic._addVersionRequirement(torchVersionRequirement, "!=2.13.*")
+      # torchvision 0.28 requires torch 2.13, therefore it has to be excluded as well
+      torchvisionVersionRequirement = PyTorchUtilsLogic._addVersionRequirement(torchvisionVersionRequirement, "!=0.28.*")
     if torchVersionRequirement is None:
       torchVersionRequirement = ""
     if torchvisionVersionRequirement is None:
@@ -251,6 +265,17 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     if forceComputationBackend is not None:
       args.append(f"--pytorch-computation-backend={forceComputationBackend}")
     return args
+
+  @staticmethod
+  def _addVersionRequirement(versionRequirement, additionalRequirement):
+    """Combine a version requirement (such as ">=2.1.2") with an additional requirement (such as "!=2.13.*").
+
+    :param versionRequirement: existing version requirement, may be None or empty
+    :param additionalRequirement: version requirement to add
+    """
+    if not versionRequirement:
+      return additionalRequirement
+    return versionRequirement + "," + additionalRequirement
 
   @staticmethod
   def _installLightTheTorch():
