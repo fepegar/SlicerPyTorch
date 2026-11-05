@@ -180,6 +180,16 @@
        </widget>
       </item>
       <item row="4" column="0" colspan="2">
+       <widget class="QPushButton" name="upgradePushButton">
+        <property name="toolTip">
+         <string>Install the PyTorch version that torchvulkan supports, so that the Vulkan device of this computer can be used for GPU computation. Only available when PyTorch is installed and a Vulkan driver is present.</string>
+        </property>
+        <property name="text">
+         <string>Use Vulkan GPU</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="2">
        <layout class="QHBoxLayout" name="horizontalLayout_3">
         <item>
          <widget class="QPushButton" name="uninstallPushButton">
