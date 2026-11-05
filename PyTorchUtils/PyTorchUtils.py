@@ -46,6 +46,7 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
 
     self.ui.detectPushButton.clicked.connect(self.onDetect)
     self.ui.installPushButton.clicked.connect(self.onInstallTorch)
+    self.ui.upgradePushButton.clicked.connect(self.onUpgradeTorchForVulkan)
     self.ui.uninstallPushButton.clicked.connect(self.onUninstallTorch)
     self.ui.restartPushButton.clicked.connect(self.onApplicationRestart)
 
@@ -80,6 +81,29 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
           slicer.util.delayDisplay(f'PyTorch {torch.__version__} installed successfully using {self.logic.getDevice()}.', autoCloseMsec=2000)
     self.updateVersionInformation()
 
+  def onUpgradeTorchForVulkan(self):
+    with slicer.util.tryWithErrorDisplay("Failed to enable computation on the Vulkan device.", waitCursor=True):
+      requirement = self.logic.getTorchUpgradeRequirementForVulkan()
+      if requirement is None:
+        # The installed PyTorch is already compatible with torchvulkan, only torchvulkan has to be installed
+        if self.logic.enableVulkan():
+          import torchvulkan
+          slicer.util.delayDisplay(f'Vulkan device enabled: {torchvulkan.get_device_name()}', autoCloseMsec=3000)
+        else:
+          slicer.util.messageBox(
+            'torchvulkan could not be installed or it cannot use any Vulkan device, therefore computation will use the CPU.'
+            ' If PyTorch was updated during this session, restart the application and try again.')
+      else:
+        install = slicer.util.confirmOkCancelDisplay(
+          f'PyTorch {requirement} will be downloaded and installed, which enables GPU computation on the Vulkan device.'
+          ' The process might take some minutes, and the application will have to be restarted afterwards.')
+        if not install:
+          return
+        self.logic.installTorch(askConfirmation=False, torchVersionRequirement=requirement)
+        slicer.util.messageBox(
+          f'PyTorch {requirement} was installed. The application must be restarted to use the Vulkan device.')
+    self.updateVersionInformation()
+
   def onUninstallTorch(self):
     with slicer.util.tryWithErrorDisplay("Failed to uninstall PyTorch. Probably PyTorch is already in use. Please restart the application and try again.", waitCursor=True):
       self.logic.uninstallTorch()
@@ -103,13 +127,31 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
     except Exception as e:
       logging.error(str(e))
       self.ui.nvidiaVersionInformation.text = "not found"
+    try:
+      self.ui.vulkanVersionInformation.text = self.logic.vulkanVersionInformation
+    except Exception as e:
+      logging.error(str(e))
+      self.ui.vulkanVersionInformation.text = "unknown"
+    try:
+      # The button is only useful when PyTorch is installed and a Vulkan driver is present
+      self.ui.upgradePushButton.enabled = (
+        PyTorchUtilsLogic.torchInstalled() and PyTorchUtilsLogic.vulkanDriverAvailable())
+    except Exception as e:
+      logging.error(str(e))
+      self.ui.upgradePushButton.enabled = False
 
   def onApplicationRestart(self):
     slicer.util.restart()
 
 class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
+  # PyTorch version required by the most recent torchvulkan release, queried from PyPI at most once per session
+  _torchvulkanTorchRequirementCache = {}
+  # Set to True when the user was already asked whether PyTorch should be upgraded for torchvulkan in this session
+  _torchUpgradeOffered = False
+
   def __init__(self):
     self._torch = None
+    self._vulkanDevice = None
 
   @property
   def nvidiaDriverVersionInformation(self):
@@ -127,6 +169,28 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     except Exception as e:
       # Don't install light-the-torch just for getting the NVIDIA driver version
       return ""
+
+  @property
+  def vulkanVersionInformation(self):
+    """Get Vulkan driver and torchvulkan information as a string that can be displayed to the user.
+
+    This never installs anything and never accesses the network.
+    """
+    if not PyTorchUtilsLogic.vulkanDriverAvailable():
+      return "not found"
+    if PyTorchUtilsLogic.torchvulkanInstalled():
+      try:
+        import torchvulkan
+        if torchvulkan.is_available():
+          return f"driver found, torchvulkan {torchvulkan.__version__}: {torchvulkan.get_device_name()}"
+        return f"driver found, torchvulkan {torchvulkan.__version__} installed, no usable device"
+      except Exception as e:
+        logging.warning(str(e))
+        return "driver found, torchvulkan cannot be loaded"
+    torchRequirement = PyTorchUtilsLogic._torchvulkanTorchRequirementCache.get('value')
+    if torchRequirement and not PyTorchUtilsLogic._installedTorchVersionSatisfies(torchRequirement):
+      return f"driver found, torchvulkan requires PyTorch {torchRequirement}"
+    return "driver found, torchvulkan not installed"
 
   @property
   def torchVersionInformation(self):
@@ -179,7 +243,11 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     return installed
 
   def importTorch(self):
-    """Import the ``torch`` Python module, installing it if necessary."""
+    """Import the ``torch`` Python module, installing it if necessary.
+
+    If CUDA is not available but a Vulkan driver is, then the ``vulkan`` device is also registered
+    (installing torchvulkan if necessary).
+    """
     if PyTorchUtilsLogic.torchInstalled():
       import torch
     else:
@@ -189,7 +257,76 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     else:
       logging.info(f'PyTorch {torch.__version__} imported successfully')
       logging.info(f'CUDA available: {torch.cuda.is_available()}')
+      self._initVulkan(torch)
     return torch
+
+  def _initVulkan(self, torch):
+    """Register the ``vulkan`` device of PyTorch, installing torchvulkan if necessary.
+
+    CUDA is always preferred. torchvulkan is experimental, it is constrained to specific PyTorch versions and it is
+    available only on certain platforms, therefore it is only attempted when CUDA is not available and a Vulkan
+    driver is accessible. Any failure is logged and computation simply falls back to the CPU.
+    """
+    self._vulkanDevice = None
+    if torch.cuda.is_available():
+      return
+    if not PyTorchUtilsLogic.vulkanDriverAvailable():
+      logging.info('Vulkan driver not found, therefore the Vulkan backend of PyTorch is not used')
+      return
+    try:
+      torchRequirement = PyTorchUtilsLogic._getTorchvulkanTorchRequirement()
+      if torchRequirement and not PyTorchUtilsLogic._installedTorchVersionSatisfies(torchRequirement):
+        if not self._offerTorchUpgradeForVulkan(torchRequirement):
+          return
+        try:
+          torch = self.installTorch(askConfirmation=False, torchVersionRequirement=torchRequirement)
+        except Exception as e:
+          logging.warning(f'Failed to install PyTorch {torchRequirement}: {e}')
+          return
+        if torch is None:
+          return
+        self._torch = torch
+        # The previously imported torch module is still loaded in this process, so the Vulkan device can only be used
+        # after the application has been restarted.
+        logging.info(f'PyTorch {torchRequirement} was installed for torchvulkan, the application must be restarted to use the Vulkan device')
+        if slicer.util.mainWindow() is not None:
+          slicer.util.messageBox(
+            f'PyTorch {torchRequirement} was installed so that the Vulkan device of this computer can be used for'
+            ' computation. The application must be restarted before PyTorch can use the Vulkan device.')
+        return
+      if not PyTorchUtilsLogic.installTorchvulkan():
+        return
+      import torchvulkan
+      self._vulkanDevice = torch.device('vulkan')
+      logging.info(f'Vulkan device available: {torchvulkan.get_device_name()}')
+    except Exception as e:
+      logging.warning(f'Failed to initialize the Vulkan backend of PyTorch: {e}')
+
+  def _offerTorchUpgradeForVulkan(self, torchVersionRequirement):
+    """Offer to install a PyTorch version that torchvulkan supports, so that the Vulkan device can be used.
+
+    The user is asked only once per session, and only if a user interface is available.
+
+    :param torchVersionRequirement: PyTorch version requirement of torchvulkan (for example ">=2.15.0,<2.16")
+    :return: True if the user requested the upgrade
+    """
+    if PyTorchUtilsLogic._torchUpgradeOffered:
+      return False
+    PyTorchUtilsLogic._torchUpgradeOffered = True
+    if slicer.app.commandOptions().testingEnabled or slicer.util.mainWindow() is None:
+      logging.info(
+        f'torchvulkan requires PyTorch {torchVersionRequirement}, but there is no user interface to offer installing it')
+      return False
+    import importlib.metadata
+    try:
+      installedVersion = importlib.metadata.version('torch')
+    except importlib.metadata.PackageNotFoundError:
+      return False
+    return slicer.util.confirmOkCancelDisplay(
+      f'The Vulkan device of this computer cannot be used for computation, because torchvulkan requires PyTorch'
+      f' {torchVersionRequirement} but PyTorch {installedVersion} is installed.'
+      f' PyTorch {torchVersionRequirement} will be downloaded and installed if you continue, which enables GPU computation.'
+      ' The process might take some minutes, and the application will have to be restarted afterwards.')
 
   def installTorch(self, askConfirmation=False, forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
     """Install PyTorch and return the ``torch`` Python module.
@@ -200,7 +337,12 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
     If computation backend is not specified then the ``light-the-torch`` Python package is used to get the most recent version of
     PyTorch compatible with the installed NVIDIA drivers. If CUDA-compatible device is not found, a version compiled for CPU will be installed.
+    If no CUDA-compatible device is found but a Vulkan driver is available, then the most recent PyTorch version that
+    torchvulkan supports is installed, so that the GPU can be used through Vulkan.
     """
+
+    if torchVersionRequirement is None:
+      torchVersionRequirement = PyTorchUtilsLogic._getPreferredTorchVersionRequirement(forceComputationBackend)
 
     args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend, torchVersionRequirement, torchvisionVersionRequirement)
 
@@ -208,6 +350,8 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       install = slicer.util.confirmOkCancelDisplay(
         f'PyTorch will be downloaded and installed using light-the-torch (ltt {" ".join(args)}).'
         ' The process might take some minutes.'
+        ' If no CUDA-compatible device is found but a Vulkan driver is available, then the Vulkan backend of PyTorch'
+        ' (torchvulkan) will be installed as well.'
       )
       if not install:
         logging.info('Installation of PyTorch aborted by user')
@@ -228,8 +372,366 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
 
   def uninstallTorch(self, askConfirmation=False, forceComputationBackend=None):
     """Uninstall PyTorch"""
+    PyTorchUtilsLogic.uninstallTorchvulkan()
     slicer.util.pip_uninstall('torch torchvision')
     logging.info(f'PyTorch uninstalled successfully.')
+
+  @staticmethod
+  def torchvulkanInstalled():
+    """Return True if the ``torchvulkan`` package is installed. The package is not imported."""
+    import importlib.metadata
+    try:
+      importlib.metadata.distribution('torchvulkan')
+    except importlib.metadata.PackageNotFoundError:
+      return False
+    return True
+
+  @staticmethod
+  def vulkanDriverAvailable():
+    """Return True if a Vulkan driver (Vulkan loader library) is accessible on this system.
+
+    This only checks that the Vulkan loader can be loaded. Whether any GPU can actually be used is verified by
+    importing torchvulkan and calling its ``is_available()`` method.
+    """
+    import sys
+    import platform
+    if sys.platform == 'darwin':
+      # The macOS wheels of torchvulkan bundle MoltenVK, so no system-wide Vulkan driver is needed,
+      # but these wheels are built only for Apple Silicon
+      return platform.machine() == 'arm64'
+    if sys.platform == 'win32':
+      import os
+      systemRoot = os.environ.get('SystemRoot', r'C:\Windows')
+      return os.path.exists(os.path.join(systemRoot, 'System32', 'vulkan-1.dll'))
+    # On Linux and other Unix-like systems the Vulkan loader is provided by the GPU driver
+    import ctypes
+    import ctypes.util
+    libraryPath = ctypes.util.find_library('vulkan')
+    if not libraryPath:
+      return False
+    try:
+      ctypes.CDLL(libraryPath)
+    except OSError:
+      return False
+    return True
+
+  @staticmethod
+  def installTorchvulkan():
+    """Make the Vulkan device of PyTorch available and return True if it is usable.
+
+    torchvulkan is installed with a pip constraints file that pins the already installed PyTorch packages, therefore
+    it is installed only if it is compatible with the installed PyTorch version and it can never change that version.
+    If the installed PyTorch version is incompatible (torchvulkan is released for specific PyTorch versions) or
+    torchvulkan is not available for the current platform or Python version, then it is not installed and False is
+    returned.
+    """
+    if not PyTorchUtilsLogic.torchvulkanInstalled():
+      torchRequirement = PyTorchUtilsLogic._getTorchvulkanTorchRequirement()
+      if torchRequirement and not PyTorchUtilsLogic._installedTorchVersionSatisfies(torchRequirement):
+        logging.warning(
+          f'torchvulkan requires PyTorch {torchRequirement} but a different PyTorch version is installed, '
+          'therefore the Vulkan device cannot be used')
+        return False
+      if not PyTorchUtilsLogic._loadedTorchVersionMatchesInstalled():
+        logging.warning(
+          'PyTorch was updated in this session, therefore the application must be restarted before torchvulkan can be used')
+        return False
+      logging.info('Installing torchvulkan (Vulkan backend for PyTorch)...')
+      import sys
+      installed = False
+      wheelAttempted = False
+      if sys.platform.startswith('linux'):
+        # Slicer's Python accepts only manylinux wheels that target glibc 2.28 or older, while torchvulkan publishes
+        # newer manylinux wheels, therefore pip cannot install torchvulkan on Linux. Unpacking the wheel instead also
+        # works on systems where pip would accept it, so it is always tried first there to avoid a useless error.
+        wheelAttempted = True
+        installed = PyTorchUtilsLogic._installTorchvulkanWheel()
+      if not installed:
+        constraintFile = PyTorchUtilsLogic._createPipConstraintFile()
+        try:
+          # --only-binary: torchvulkan is a compiled extension that can be built from source only with a Vulkan SDK
+          # and a matching toolchain, so building it locally is never attempted
+          slicer.util.pip_install(['torchvulkan', '--only-binary=torchvulkan', '--constraint', constraintFile])
+        except Exception as e:
+          logging.warning(f'Failed to install torchvulkan with pip: {e}')
+        finally:
+          import os
+          try:
+            os.unlink(constraintFile)
+          except OSError:
+            pass
+        installed = PyTorchUtilsLogic.torchvulkanInstalled()
+      if not installed and not wheelAttempted:
+        installed = PyTorchUtilsLogic._installTorchvulkanWheel()
+      if not installed:
+        logging.warning(
+          'torchvulkan was not installed: it is available only for certain PyTorch versions, platforms, and Python versions'
+        )
+        return False
+    if PyTorchUtilsLogic._torchvulkanUsable():
+      return True
+    # Unusable torchvulkan is removed so that it does not prevent installing PyTorch later
+    try:
+      PyTorchUtilsLogic.uninstallTorchvulkan()
+    except Exception as e:
+      logging.warning(f'Failed to uninstall torchvulkan: {e}')
+    return False
+
+  @staticmethod
+  def _getPreferredTorchVersionRequirement(forceComputationBackend=None):
+    """Get the PyTorch version requirement to use when PyTorch is installed, or None if there is no preference.
+
+    If a CUDA-compatible device is available then CUDA is preferred and the newest PyTorch version is used. If there is
+    no CUDA-compatible device but a Vulkan driver is available, then the newest PyTorch version supported by
+    torchvulkan is requested, so that the GPU can be used through Vulkan.
+
+    :param forceComputationBackend: optional parameter to set computation backend (cpu, cu116, cu117, ...)
+    """
+    if not PyTorchUtilsLogic.vulkanDriverAvailable():
+      return None
+    try:
+      backends = PyTorchUtilsLogic.getCompatibleComputationBackends(forceComputationBackend=forceComputationBackend)
+    except Exception as e:
+      logging.warning(f'Failed to determine the available computation backends: {e}')
+      return None
+    if any(backend != 'cpu' for backend in backends):
+      # A CUDA-compatible device is available, which is preferred over Vulkan
+      return None
+    requirement = PyTorchUtilsLogic._getTorchvulkanTorchRequirement()
+    if requirement:
+      logging.info(
+        f'No CUDA-compatible device was found but a Vulkan driver is available, therefore PyTorch {requirement}'
+        ' (the version required by torchvulkan) is installed')
+    return requirement
+
+  @staticmethod
+  def _getTorchvulkanTorchRequirement():
+    """Get the PyTorch version requirement of the most recent torchvulkan release.
+
+    :return: PyTorch version requirement (for example ">=2.15.0,<2.16"), or None if torchvulkan does not restrict it
+      or it cannot be determined (for example, there is no internet connection)
+    """
+    cache = PyTorchUtilsLogic._torchvulkanTorchRequirementCache
+    if 'value' in cache:
+      return cache['value']
+    requirement = None
+    try:
+      import json
+      import urllib.request
+      from packaging.requirements import Requirement
+      with urllib.request.urlopen('https://pypi.org/pypi/torchvulkan/json', timeout=15) as response:
+        requiresDist = json.load(response)['info'].get('requires_dist') or []
+      for entry in requiresDist:
+        dependency = Requirement(entry)
+        if dependency.name.lower() == 'torch' and not dependency.marker:
+          requirement = str(dependency.specifier) or None
+          break
+    except Exception as e:
+      logging.warning(f'Failed to determine the PyTorch version required by torchvulkan: {e}')
+    cache['value'] = requirement
+    return requirement
+
+  @staticmethod
+  def _loadedTorchVersionMatchesInstalled():
+    """Return True if the imported torch module is the version that is installed on disk.
+
+    They differ when PyTorch was installed during the session, in which case the application has to be restarted before
+    a PyTorch extension module (such as torchvulkan) can be loaded.
+    """
+    import importlib.metadata
+    try:
+      import torch
+      installedVersion = importlib.metadata.version('torch')
+    except Exception:
+      return True
+    return torch.__version__ == installedVersion
+
+  @staticmethod
+  def _getPythonExecutable():
+    """Get an interpreter that can run pip in Slicer's Python environment, or None if there is none.
+
+    ``sys.executable`` is not necessarily a Python interpreter in the Slicer application (it may be the application
+    executable), therefore ``PythonSlicer`` is preferred and every candidate is verified.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+    candidates = []
+    pythonSlicer = shutil.which('PythonSlicer')
+    if pythonSlicer:
+      candidates.append(pythonSlicer)
+    candidates.append(os.path.join(os.path.dirname(sys.executable), 'PythonSlicer' + ('.exe' if os.name == 'nt' else '')))
+    candidates.append(sys.executable)
+    for candidate in candidates:
+      if not os.path.isfile(candidate):
+        continue
+      try:
+        result = subprocess.run(
+          [candidate, '-m', 'pip', '--version'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+      except Exception:
+        continue
+      if result.returncode == 0:
+        return candidate
+    return None
+
+  @staticmethod
+  def _installedTorchVersionSatisfies(versionRequirement):
+    """Return True if the installed PyTorch version satisfies the given version requirement."""
+    import importlib.metadata
+    from packaging.specifiers import SpecifierSet
+    try:
+      installedVersion = importlib.metadata.version('torch')
+    except importlib.metadata.PackageNotFoundError:
+      return False
+    return SpecifierSet(versionRequirement).contains(installedVersion, prereleases=True)
+
+  @staticmethod
+  def _getTorchvulkanWheelPlatformTags(architecture):
+    """Get the manylinux platform tags to try when downloading the torchvulkan wheel, newest first."""
+    return [f'manylinux_2_{minor}_{architecture}' for minor in (34, 33, 31, 28, 27, 24, 17)]
+
+  @staticmethod
+  def _torchvulkanWheelMatchesInstalledTorch(wheelPath):
+    """Return True if the torch requirement of a torchvulkan wheel is satisfied by the installed PyTorch version."""
+    import zipfile
+    from packaging.requirements import Requirement
+    try:
+      with zipfile.ZipFile(wheelPath) as wheelFile:
+        metadataName = next(name for name in wheelFile.namelist() if name.endswith('.dist-info/METADATA'))
+        metadataText = wheelFile.read(metadataName).decode('utf-8', 'replace')
+    except Exception as e:
+      logging.warning(f'Failed to read the metadata of {wheelPath}: {e}')
+      return False
+    for line in metadataText.splitlines():
+      if not line.startswith('Requires-Dist:'):
+        continue
+      try:
+        dependency = Requirement(line.split(':', 1)[1].strip())
+      except Exception:
+        continue
+      if dependency.name.lower() == 'torch' and not dependency.marker:
+        return PyTorchUtilsLogic._installedTorchVersionSatisfies(str(dependency.specifier))
+    return True
+
+  @staticmethod
+  def _getSystemGlibcVersion():
+    """Get the version of the system glibc as a (major, minor) tuple, or None if it cannot be determined."""
+    import os
+    try:
+      version = os.confstr('CS_GNU_LIBC_VERSION')  # for example "glibc 2.28"
+    except (ValueError, OSError, AttributeError):
+      return None
+    parts = version.split()
+    if len(parts) != 2 or not parts[0].startswith('glibc'):
+      return None
+    try:
+      major, minor = parts[1].split('.')[:2]
+      return (int(major), int(minor))
+    except ValueError:
+      return None
+
+  @staticmethod
+  def _installTorchvulkanWheel():
+    """Install torchvulkan by unpacking its wheel, without pip's platform tag check.
+
+    Slicer's Python rejects manylinux wheels that are built for a newer glibc than Slicer's own binaries are built
+    for (manylinux_2_28), while torchvulkan publishes manylinux_2_34 wheels for Linux. Such a wheel only requires
+    glibc 2.34 on the machine that runs it, so if the system has a recent enough glibc then the matching wheel is
+    unpacked into the site-packages directory. If the system glibc is too old then the wheel could not be loaded, so
+    nothing is installed.
+
+    :return: True if the torchvulkan wheel was unpacked
+    """
+    import importlib
+    import os
+    import platform
+    import subprocess
+    import sys
+    import sysconfig
+    import tempfile
+    import zipfile
+    if not sys.platform.startswith('linux'):
+      return False
+    architecture = {'x86_64': 'x86_64', 'amd64': 'x86_64', 'aarch64': 'aarch64', 'arm64': 'aarch64'}.get(platform.machine())
+    if architecture is None:
+      return False
+    glibcVersion = PyTorchUtilsLogic._getSystemGlibcVersion()
+    if glibcVersion is None or glibcVersion < (2, 34):
+      logging.info('The glibc of this system is older than 2.34, therefore the torchvulkan wheel cannot be loaded')
+      return False
+    pythonExecutable = PyTorchUtilsLogic._getPythonExecutable()
+    if pythonExecutable is None:
+      logging.warning('Failed to find an interpreter that can install the torchvulkan wheel')
+      return False
+    pythonVersion = f'{sys.version_info[0]}.{sys.version_info[1]}'
+    downloadDirectory = tempfile.mkdtemp(prefix='torchvulkan-wheel-')
+    command = [
+      pythonExecutable, '-m', 'pip', 'download', 'torchvulkan', '--no-deps', '--only-binary=:all:',
+      '--implementation', 'cp', '--python-version', pythonVersion, '--abi', f'cp{pythonVersion.replace(".", "")}',
+      '--dest', downloadDirectory,
+    ]
+    for platformTag in PyTorchUtilsLogic._getTorchvulkanWheelPlatformTags(architecture):
+      command.extend(['--platform', platformTag])
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    wheelFiles = sorted(f for f in os.listdir(downloadDirectory) if f.endswith('.whl'))
+    if result.returncode != 0 or not wheelFiles:
+      logging.warning(f'Failed to download the torchvulkan wheel: {result.stdout.strip()}')
+      return False
+    wheelPath = os.path.join(downloadDirectory, wheelFiles[0])
+    if not PyTorchUtilsLogic._torchvulkanWheelMatchesInstalledTorch(wheelPath):
+      logging.warning(f'{wheelFiles[0]} requires a different PyTorch version, therefore it is not installed')
+      return False
+    sitePackages = sysconfig.get_paths()['purelib']
+    with zipfile.ZipFile(os.path.join(downloadDirectory, wheelFiles[0])) as wheelFile:
+      wheelFile.extractall(sitePackages)
+    # The new files must be visible to imports and to importlib.metadata in this already running process
+    importlib.invalidate_caches()
+    logging.info(f'torchvulkan wheel {wheelFiles[0]} unpacked into {sitePackages}')
+    return True
+
+  @staticmethod
+  def _createPipConstraintFile():
+    """Create a pip constraints file that pins the already installed torch and torchvision packages.
+
+    Passing this file to pip makes it install torchvulkan only if torchvulkan is compatible with the installed
+    PyTorch version, and makes it impossible for pip to change the installed PyTorch version.
+    """
+    import os
+    import tempfile
+    import importlib.metadata
+    constraints = []
+    for packageName in ('torch', 'torchvision'):
+      try:
+        constraints.append(f'{packageName}=={importlib.metadata.version(packageName)}')
+      except importlib.metadata.PackageNotFoundError:
+        pass
+    constraintFile = os.path.join(tempfile.mkdtemp(prefix='torchvulkan-constraints-'), 'constraints.txt')
+    with open(constraintFile, 'w') as f:
+      f.write('\n'.join(constraints))
+    return constraintFile
+
+  @staticmethod
+  def uninstallTorchvulkan():
+    """Uninstall the ``torchvulkan`` package, if it is installed."""
+    if not PyTorchUtilsLogic.torchvulkanInstalled():
+      return
+    slicer.util.pip_uninstall('torchvulkan')
+    logging.info('torchvulkan uninstalled successfully.')
+
+  @staticmethod
+  def _torchvulkanUsable():
+    """Return True if torchvulkan can be imported and it provides a usable Vulkan device."""
+    try:
+      import torchvulkan
+      if torchvulkan.is_available():
+        logging.info(f'torchvulkan {torchvulkan.__version__} is usable, {torchvulkan.device_count()} Vulkan device(s) found')
+        return True
+      logging.warning('torchvulkan is installed but no usable Vulkan device was found')
+    except Exception as e:
+      import torch
+      logging.warning(f'torchvulkan is not compatible with the installed PyTorch {torch.__version__}: {e}')
+    return False
 
   @staticmethod
   def _getPipInstallArguments(forceComputationBackend=None, torchVersionRequirement=None, torchvisionVersionRequirement=None):
@@ -324,14 +826,50 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     model = self.torch.hub.load(repo, modelName, *args, **kwargs)
     return model
 
+  def getTorchUpgradeRequirementForVulkan(self):
+    """Get the PyTorch version requirement that must be installed to use the Vulkan device.
+
+    :return: PyTorch version requirement (for example ">=2.15.0,<2.16"), or None if no upgrade is needed or possible
+    """
+    if not PyTorchUtilsLogic.vulkanDriverAvailable() or not PyTorchUtilsLogic.torchInstalled():
+      return None
+    requirement = PyTorchUtilsLogic._getTorchvulkanTorchRequirement()
+    if requirement and not PyTorchUtilsLogic._installedTorchVersionSatisfies(requirement):
+      return requirement
+    return None
+
+  def enableVulkan(self):
+    """Install torchvulkan if necessary and use the Vulkan device in this session.
+
+    Nothing is done if a CUDA device is available, because CUDA is preferred over Vulkan.
+
+    :return: True if the Vulkan device is available
+    """
+    if self.torch.cuda.is_available():
+      return False
+    if not PyTorchUtilsLogic.vulkanDriverAvailable():
+      return False
+    if not PyTorchUtilsLogic.installTorchvulkan():
+      return False
+    self._vulkanDevice = self.torch.device('vulkan')
+    return True
+
   def getDevice(self):
-    """Get CUDA device if available and CPU otherwise."""
-    return self.torch.device('cuda') if self.torch.cuda.is_available() else 'cpu'
+    """Get CUDA device if available, Vulkan device if available, and CPU otherwise."""
+    torch = self.torch  # importing torch if necessary, which also registers the Vulkan device if applicable
+    if torch.cuda.is_available():
+      return torch.device('cuda')
+    return self._vulkanDevice if self._vulkanDevice is not None else 'cpu'
 
   @property
   def cuda(self):
     """Return True if a CUDA-compatible device is available."""
-    return self.getDevice() != 'cpu'
+    return self.torch.cuda.is_available()
+
+  @property
+  def vulkan(self):
+    """Return True if a Vulkan-compatible device is available."""
+    return self.getDevice() != 'cpu' and not self.torch.cuda.is_available()
 
 
 class PyTorchUtilsTest(ScriptedLoadableModuleTest):
