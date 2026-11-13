@@ -9,6 +9,12 @@ from slicer.ScriptedLoadableModule import (
   ScriptedLoadableModuleTest,
 )
 
+# ROCm versions for which PyTorch publishes torch and torchvision wheels at https://download.pytorch.org/whl/ (Linux only)
+ROCM_COMPUTATION_BACKENDS = [
+  "rocm6.0", "rocm6.1", "rocm6.2", "rocm6.2.4", "rocm6.3", "rocm6.4",
+  "rocm7.0", "rocm7.1", "rocm7.2", "rocm7.14", "rocm10.0",
+]
+
 
 class PyTorchUtils(ScriptedLoadableModule):
   def __init__(self, parent):
@@ -103,6 +109,8 @@ class PyTorchUtilsWidget(ScriptedLoadableModuleWidget):
     except Exception as e:
       logging.error(str(e))
       self.ui.nvidiaVersionInformation.text = "not found"
+    gpuArchitectures = PyTorchUtilsLogic._detectAmdGpuArchitectures()
+    self.ui.amdGpuInformation.text = ", ".join(gpuArchitectures) if gpuArchitectures else "not found"
 
   def onApplicationRestart(self):
     slicer.util.restart()
@@ -199,7 +207,8 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     :param torchvisionVersionRequirement: optional version requirement for torchvision (e.g., ">=0.8")
 
     If computation backend is not specified then the ``light-the-torch`` Python package is used to get the most recent version of
-    PyTorch compatible with the installed NVIDIA drivers. If CUDA-compatible device is not found, a version compiled for CPU will be installed.
+    PyTorch compatible with the installed NVIDIA drivers. If no NVIDIA driver is found but an AMD GPU is found (Linux only),
+    a version compiled for ROCm will be installed. Otherwise, a version compiled for CPU will be installed.
     """
 
     args = PyTorchUtilsLogic._getPipInstallArguments(forceComputationBackend, torchVersionRequirement, torchvisionVersionRequirement)
@@ -264,9 +273,40 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     if macOSIntel:
       # On Intel macOS (and Rosetta2), the PyTorch version available on PyPI requires numpy<2, and installing it with pip will fail if numpy 2 is already installed. This is not an issue on other platforms where newer PyTorch versions are available.
       args.append("numpy<2")
+    if forceComputationBackend is None and PyTorchUtilsLogic._detectAmdGpuArchitectures() and not PyTorchUtilsLogic._nvidiaDriverDetected():
+      # light-the-torch only detects CUDA, therefore ROCm backends are specified explicitly
+      forceComputationBackend = ",".join(ROCM_COMPUTATION_BACKENDS + ["cpu"])
     if forceComputationBackend is not None:
       args.append(f"--pytorch-computation-backend={forceComputationBackend}")
     return args
+
+  @staticmethod
+  def _detectAmdGpuArchitectures():
+    """Get architectures (such as gfx1100) of AMD GPUs available for ROCm (Linux only).
+
+    Only the amdgpu kernel driver is needed, as PyTorch ROCm packages include or install the ROCm runtime.
+    """
+    import glob
+    import re
+    architectures = []
+    for propertiesFilePath in sorted(glob.glob("/sys/class/kfd/kfd/topology/nodes/*/properties")):
+      with open(propertiesFilePath) as propertiesFile:
+        match = re.search(r"^gfx_target_version\s+(\d+)", propertiesFile.read(), re.MULTILINE)
+      # CPU nodes have gfx_target_version 0
+      if match and int(match[1]) != 0:
+        # gfx_target_version is major*10000 + minor*100 + stepping (e.g., 90010 -> gfx90a)
+        version = int(match[1])
+        architectures.append(f"gfx{version // 10000}{(version // 100) % 100:x}{version % 100:x}")
+    return architectures
+
+  @staticmethod
+  def _nvidiaDriverDetected():
+    import subprocess
+    try:
+      subprocess.run(["nvidia-smi"], check=True, capture_output=True)
+      return True
+    except (OSError, subprocess.SubprocessError):
+      return False
 
   @staticmethod
   def _addVersionRequirement(versionRequirement, additionalRequirement):
@@ -311,6 +351,14 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
       logging.warning(str(e))
       raise ValueError(f"Failed to get computation backend. Requested computation backend: `{forceComputationBackend}`.")
 
+    if forceComputationBackend is None and PyTorchUtilsLogic._detectAmdGpuArchitectures():
+      # List ROCm backends also if NVIDIA GPU is found (then only CUDA backends are listed by light-the-torch)
+      import light_the_torch._cb
+      for backend in ROCM_COMPUTATION_BACKENDS:
+        backend = light_the_torch._cb.ComputationBackend.from_str(backend)
+        if backend not in backends:
+          backends.append(backend)
+
     return backends
 
   def getPyTorchHubModel(self, repoOwner, repoName, modelName, addPretrainedKwarg=True, *args, **kwargs):
@@ -325,7 +373,6 @@ class PyTorchUtilsLogic(ScriptedLoadableModuleLogic):
     return model
 
   def getDevice(self):
-    """Get CUDA device if available and CPU otherwise."""
     return self.torch.device('cuda') if self.torch.cuda.is_available() else 'cpu'
 
   @property
